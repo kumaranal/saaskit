@@ -8,8 +8,8 @@
 import getLogger from '~/core/logger';
 const logger = getLogger();
 
-const processWithThreadPool = async (
-  taskArray: [],
+export const processWithThreadPool = async (
+  taskArray: {}[] | [],
   operation: any,
   threadPoolSize: number = 5,
 ) => {
@@ -20,7 +20,7 @@ const processWithThreadPool = async (
     while (queue.length > 0) {
       const task = queue.shift(); // Get the next task
       try {
-        const result = await operation(task); // Perform the operation
+        const result = await operation(); // Perform the operation
         results.push(result); // Save the result
       } catch (error) {
         logger.error(

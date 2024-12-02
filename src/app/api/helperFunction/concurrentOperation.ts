@@ -1,8 +1,8 @@
-const processInParallel = async (operation: any, array: []) => {
+export const processInParallel = async (operation: any, array: {}[] | []) => {
   const results = await Promise.all(
     array.map(async (item, index) => {
       try {
-        const result = await operation(item, index);
+        const result = await operation();
         return { success: true, result, index };
       } catch (error) {
         return { success: false, error, index };
