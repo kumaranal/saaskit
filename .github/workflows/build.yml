@@ -1,0 +1,153 @@
+name: 🚀 Build
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request: {}
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dependencies:
+    name: Install Dependencies
+    runs-on: 'ubuntu-latest'
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v3
+
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies using package.json
+        run: npm i
+  lint:
+    name: ⬣ ESLint
+    needs: dependencies # only run if dependencies job passes
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: 🛑 Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v3
+
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: 🔬 Lint
+        run: npm run lint
+  format:
+    name: ⬣ Prettier
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: 🛑 Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v3
+
+      - name: ⎔ Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: 🔬 Format
+        run: npm run format
+  typecheck:
+    name: ʦ TypeScript
+    needs: dependencies # only run if dependencies job passes
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: 🛑 Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v3
+
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: 🔎 Type check
+        run: npm run typecheck --if-present
+  spellcheck:
+    name: 🔤 cspell Spell Check
+    needs: dependencies # only run if dependencies job passes
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: 🛑 Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v3
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - name: Install dependencies
+        run: npm ci
+      - name: 🔍 Run cspell
+        run: npx cspell '**/*'
+  push-migrations:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Check if there are new migration files
+        id: check_migrations
+        run: |
+          git fetch origin develop
+          NEW_MIGRATIONS=$(git diff --name-only origin/develop HEAD | grep -E '^supabase/migrations/.*\.sql' || true)
+          echo "New migrations: $NEW_MIGRATIONS"
+          if [ -z "$NEW_MIGRATIONS" ]; then
+            echo "No new migration files found."
+            echo "migrations_found=false" >> $GITHUB_ENV
+          else
+            echo "New migration files found."
+            echo "migrations_found=true" >> $GITHUB_ENV
+          fi
+
+      - name: Stop the job if no new migrations found
+        if: env.migrations_found == 'false'
+        run: |
+          echo "No new migrations, skipping the job."
+          exit 0
+
+      - name: Set up Node.js
+        if: env.migrations_found == 'true'
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install Supabase CLI
+        if: env.migrations_found == 'true'
+        run: npm install -g supabase
+
+      - name: Authenticate with Supabase
+        if: env.migrations_found == 'true'
+        run: supabase login --token ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Push Supabase Migrations
+        if: env.migrations_found == 'true'
+        run: |
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_URL }}
+          supabase db push
