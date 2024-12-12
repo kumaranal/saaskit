@@ -12,17 +12,13 @@ import { asyncHandlerWrapper } from '../helperFunction/asyncHandeler';
  *         description: Successful response
  */
 
-// Define the handler logic
-const getHandler = async (req: NextRequest) => {
-  // Your asynchronous operation here
+// Export the GET handler wrapped in the async handler
+export const GET = asyncHandlerWrapper(async (req: NextRequest) => {
   const data = 'dst';
   // throw new Error('myError');
   // myFunction();
   return successResponse(data);
-};
-
-// Export the GET handler wrapped in the async handler
-export const GET = asyncHandlerWrapper(getHandler);
+});
 
 function myFunction() {
   throw new Error('myErooor2');
