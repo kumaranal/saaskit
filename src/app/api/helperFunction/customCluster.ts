@@ -1,94 +1,81 @@
-import cluster, { Worker } from 'cluster';
-import os from 'os';
-
-interface ProcessResult {
+interface TaskResult<T> {
   success: boolean;
-  result?: any;
+  result?: T;
   error?: any;
-  index?: number;
+  index: number;
 }
 
-interface ParallelResult {
-  successes: any[];
+interface ProcessInParallelResult<T> {
+  successes: T[];
   errors: { error: any; index: number }[];
 }
 
-const processInParallelWithCluster = async (
-  operation: () => Promise<any>,
-  array: any[],
-): Promise<ParallelResult> => {
-  const numCPUs = os.cpus().length;
-  const numWorkers = Math.min(numCPUs, array.length);
-  const chunkSize = Math.ceil(array.length / numWorkers);
+import { Worker, isMainThread, workerData, parentPort } from 'worker_threads';
 
-  return new Promise((resolve, reject) => {
-    if (cluster.isWorker) {
-      process.on('message', async (message: { chunk: any[] }) => {
-        try {
-          const results: ProcessResult[] = await Promise.all(
-            message.chunk.map(async (item, index) => {
-              try {
-                const result = await operation();
-                return { success: true, result, index };
-              } catch (error) {
-                return { success: false, error, index };
-              }
-            }),
-          );
+/**
+ * Executes an operation in parallel using worker threads in Node.js.
+ * @param operation - The operation to be performed, either in the worker or sequentially.
+ * @param array - The array of data items to be processed.
+ */
+export const processInParallelInCluster = async <T, R>(
+  operation: (item: T) => R, // Function to execute on each item
+  array: T[], // Input data array
+) => {
+  if (isMainThread) {
+    const arr =
+      array.length > 0
+        ? array
+        : Array.from({ length: 5 }, (_, i) => i as unknown as T);
 
-          const successes = results
-            .filter((r) => r.success)
-            .map((r) => r.result);
-          const errors = results
-            .filter((r) => !r.success)
-            .map((r) => ({ error: r.error, index: r.index }));
+    // Using worker threads for parallelism
+    console.log('Using worker threads...');
+    const startTime = Date.now();
 
-          process.send?.({ success: true, results: successes, errors });
-          process.exit(0);
-        } catch (error) {
-          process.send?.({
-            success: false,
-            errors: [{ error: 'Unknown error', index: -1 }],
-          });
-          process.exit(1);
-        }
-      });
-    } else {
-      let completedWorkers = 0;
-      let successes: any[] = [];
-      let errors: { error: any; index: number }[] = [];
-
-      // Split the array into chunks
-      for (let i = 0; i < numWorkers; i++) {
-        const chunk = array.slice(i * chunkSize, (i + 1) * chunkSize);
-        const worker: Worker = cluster.fork();
-
-        worker.on('message', (message: any) => {
-          if (message.success) {
-            successes = [...successes, ...message.results];
-          } else {
-            errors = [...errors, ...(message.errors || [])];
-          }
-          completedWorkers++;
-
-          if (completedWorkers === numWorkers) {
-            resolve({ successes, errors });
-          }
+    const workers = arr.map((item) => {
+      return new Promise<void>((resolve, reject) => {
+        const worker = new Worker(__filename, {
+          workerData: { operation: operation.toString(), item },
         });
 
-        worker.on('exit', (code: number) => {
+        worker.on('message', (result) => {
+          console.log(`Worker result: ${result}`);
+          resolve();
+        });
+
+        worker.on('error', (err) => {
+          console.error('Worker error:', err);
+          reject(err);
+        });
+
+        worker.on('exit', (code) => {
           if (code !== 0) {
-            errors.push({
-              error: `Worker exited with code ${code}`,
-              index: -1,
-            });
+            reject(new Error(`Worker stopped with exit code ${code}`));
           }
         });
+      });
+    });
 
-        worker.send({ chunk });
-      }
+    await Promise.all(workers);
+
+    const timeTaken = (Date.now() - startTime) / 1000;
+    console.log(`Time taken to complete worker threads: ${timeTaken}s`);
+
+    // Sequential execution with a for loop
+    console.log('Now using for loop...');
+    const startTime2 = Date.now();
+
+    for (const item of arr) {
+      const result = operation(item);
+      console.log(`Sequential result: ${result}`);
     }
-  });
-};
 
-export { processInParallelWithCluster };
+    const timeTaken2 = (Date.now() - startTime2) / 1000;
+    console.log(`Time taken to complete for loop: ${timeTaken2}s`);
+  } else {
+    // This block runs in the worker thread
+    const { operation, item } = workerData;
+    const opFunc = new Function(`return (${operation})`)(); // Convert string back to function
+    const result = opFunc(item);
+    parentPort?.postMessage(result);
+  }
+};
